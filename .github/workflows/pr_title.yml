@@ -1,0 +1,21 @@
+name: PR Title
+
+# This repository holds the check, so it runs its own: a local `./` reference
+# resolves against the calling commit, which means a pull request changing
+# validate-pr-title.yml is validated by the version it is proposing.
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    name: Title
+    uses: ./.github/workflows/validate-pr-title.yml
