@@ -1,0 +1,107 @@
+name: Deploy Supabase Production
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing the Supabase project.
+        required: false
+        type: string
+        default: apps/supabase
+      supabase-cli-version:
+        description: Supabase CLI version to install.
+        required: false
+        type: string
+        default: latest
+      deploy-edge-functions:
+        description: Deploy Supabase edge functions after database migrations.
+        required: false
+        type: boolean
+        default: true
+      edge-functions-deploy-args:
+        description: Additional arguments passed to `supabase functions deploy`.
+        required: false
+        type: string
+        default: --use-api
+    secrets:
+      supabase_access_token:
+        description: Supabase access token used by the Supabase CLI.
+        required: true
+      supabase_db_password:
+        description: Database password for the target Supabase project.
+        required: true
+      supabase_project_id:
+        description: Supabase project ref to link and deploy.
+        required: true
+      discord_webhook_url:
+        description: Optional Discord webhook for failure notifications.
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.supabase_access_token }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.supabase_db_password }}
+      SUPABASE_PROJECT_ID: ${{ secrets.supabase_project_id }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1.7.3
+        with:
+          version: ${{ inputs.supabase-cli-version }}
+
+      - name: Link production project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
+
+      - name: Deploy database migrations
+        run: supabase db push
+
+      - name: Deploy edge functions
+        if: ${{ inputs.deploy-edge-functions }}
+        run: supabase functions deploy --project-ref "$SUPABASE_PROJECT_ID" ${{ inputs.edge-functions-deploy-args }}
+
+  notify-discord-on-failure:
+    runs-on: ubuntu-latest
+    needs:
+      - deploy
+    if: ${{ always() && needs.deploy.result == 'failure' }}
+    steps:
+      - name: Send Discord notification
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.discord_webhook_url }}
+          REPOSITORY: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "No Discord webhook configured; skipping failure notification."
+            exit 0
+          fi
+
+          payload=$(jq -n \
+            --arg content "Supabase production deploy failed for ${REPOSITORY} on branch ${REF_NAME}.\nCommit: ${SHA}\nActor: ${ACTOR}\nRun: ${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}" \
+            '{content: $content}')
+
+          curl \
+            --fail \
+            --show-error \
+            --silent \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            "$DISCORD_WEBHOOK_URL"
