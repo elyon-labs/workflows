@@ -1,0 +1,77 @@
+name: Publish GitHub Release
+
+on:
+  workflow_call:
+    secrets:
+      cicd_app_id:
+        description: GitHub App client ID used to publish releases.
+        required: true
+      cicd_private_key:
+        description: GitHub App private key used to publish releases.
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-github-release-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Get application token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ secrets.cicd_app_id }}
+          private-key: ${{ secrets.cicd_private_key }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Describe the tag
+        id: tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          start_tag="$(git describe --tags --abbrev=0 --exclude="$TAG" "$TAG" 2>/dev/null || true)"
+          echo "start-tag=$start_tag" >> "$GITHUB_OUTPUT"
+
+          git tag --list \
+            --format='%(if:equals=tag)%(objecttype)%(then)%(contents)%(end)' \
+            "$TAG" > "${RUNNER_TEMP}/release-notes.md"
+
+      - name: Publish release for the tag
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          START_TAG: ${{ steps.tag.outputs.start-tag }}
+        run: |
+          set -euo pipefail
+
+          notes="${RUNNER_TEMP}/release-notes.md"
+          args=(--title "$TAG" --verify-tag --generate-notes)
+
+          if [[ -n "$START_TAG" ]]; then
+            args+=(--notes-start-tag "$START_TAG")
+          fi
+
+          if [[ -n "$(tr -d '[:space:]' < "$notes")" ]]; then
+            args+=(--notes-file "$notes")
+          fi
+
+          gh release create "$TAG" "${args[@]}"

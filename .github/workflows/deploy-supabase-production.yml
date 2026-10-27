@@ -12,17 +12,17 @@ on:
         description: Supabase CLI version to install.
         required: false
         type: string
-        default: latest
+        default: 2.95.4
       deploy-edge-functions:
         description: Deploy Supabase edge functions after database migrations.
         required: false
         type: boolean
         default: true
-      edge-functions-deploy-args:
-        description: Additional arguments passed to `supabase functions deploy`.
+      prune-edge-functions:
+        description: Remove deployed edge functions that are absent from this repository.
         required: false
-        type: string
-        default: --use-api
+        type: boolean
+        default: false
     secrets:
       supabase_access_token:
         description: Supabase access token used by the Supabase CLI.
@@ -71,7 +71,18 @@ jobs:
 
       - name: Deploy edge functions
         if: ${{ inputs.deploy-edge-functions }}
-        run: supabase functions deploy --project-ref "$SUPABASE_PROJECT_ID" ${{ inputs.edge-functions-deploy-args }}
+        env:
+          PRUNE_EDGE_FUNCTIONS: ${{ inputs.prune-edge-functions }}
+        run: |
+          set -euo pipefail
+
+          args=(--project-ref "$SUPABASE_PROJECT_ID" --use-api)
+
+          if [[ "$PRUNE_EDGE_FUNCTIONS" == "true" ]]; then
+            args+=(--prune --yes)
+          fi
+
+          supabase functions deploy "${args[@]}"
 
   notify-discord-on-failure:
     runs-on: ubuntu-latest

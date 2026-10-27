@@ -1,0 +1,77 @@
+name: Deploy Web to Cloudflare
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version to install.
+        required: false
+        type: string
+        default: "22.23.2"
+      working-directory:
+        description: Directory containing the Cloudflare web project.
+        required: false
+        type: string
+        default: apps/web
+      checkout-ref:
+        description: Ref to deploy. Callers should use the default branch for release events.
+        required: false
+        type: string
+        default: ""
+    secrets:
+      cloudflare_api_token:
+        description: Cloudflare API token used to deploy the site.
+        required: true
+      cloudflare_account_id:
+        description: Cloudflare account containing the site.
+        required: true
+
+concurrency:
+  group: deploy-web-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.checkout-ref || github.ref }}
+          persist-credentials: false
+
+      - name: Install Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck site
+        run: pnpm web:typecheck
+
+      - name: Build site
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm web:build
+
+      - name: Deploy to Cloudflare
+        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4
+        with:
+          apiToken: ${{ secrets.cloudflare_api_token }}
+          accountId: ${{ secrets.cloudflare_account_id }}
+          workingDirectory: ${{ inputs.working-directory }}
+          packageManager: pnpm
+          command: deploy
