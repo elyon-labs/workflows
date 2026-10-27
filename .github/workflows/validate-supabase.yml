@@ -17,7 +17,7 @@ on:
         description: Supabase CLI version to install.
         required: false
         type: string
-        default: latest
+        default: 2.95.4
       deno-version:
         description: Deno version to install for edge function validation.
         required: false
@@ -48,11 +48,11 @@ on:
         required: false
         type: boolean
         default: true
-      function-test-permissions:
-        description: Permissions passed to deno test.
+      function-test-allow-env:
+        description: Comma-separated environment variables available to Deno function tests.
         required: false
         type: string
-        default: --allow-all
+        default: SUPABASE_URL,SUPABASE_ANON_KEY,SB_PUBLISHABLE_KEY
       db-lint-level:
         description: Error level emitted by supabase db lint.
         required: false
@@ -123,7 +123,7 @@ jobs:
           FUNCTIONS_DIRECTORY: ${{ inputs.functions-directory }}
           DENO_CONFIG_PATH: ${{ inputs.deno-config-path }}
           DENO_LOCK_PATH: ${{ inputs.deno-lock-path }}
-          FUNCTION_TEST_PERMISSIONS: ${{ inputs.function-test-permissions }}
+          FUNCTION_TEST_ALLOW_ENV: ${{ inputs.function-test-allow-env }}
         run: |
           mapfile -d '' test_files < <(find "$FUNCTIONS_DIRECTORY" -path '*/node_modules/*' -prune -o \( -name '*_test.ts' -o -name '*.test.ts' \) -print0)
 
@@ -140,7 +140,11 @@ jobs:
             args+=(--config "$DENO_CONFIG_PATH")
           fi
 
-          deno test "${args[@]}" $FUNCTION_TEST_PERMISSIONS "${test_files[@]}"
+          if [ -n "$FUNCTION_TEST_ALLOW_ENV" ]; then
+            args+=(--allow-env="$FUNCTION_TEST_ALLOW_ENV")
+          fi
+
+          deno test "${args[@]}" "${test_files[@]}"
 
   database:
     if: ${{ inputs.validate-database }}
